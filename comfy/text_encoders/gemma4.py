@@ -87,6 +87,8 @@ class Gemma4_31B_Config(Gemma4Config):
     num_hidden_layers: int = 60
     num_attention_heads: int = 32
     num_key_value_heads: int = 16
+    num_global_key_value_heads = 4
+    attention_k_eq_v = True
     vision_bidirectional = True
     sliding_attention = [1024, 1024, 1024, 1024, 1024, False]
     hidden_size_per_layer_input: int = 0
@@ -1468,7 +1470,7 @@ class Gemma4_Tokenizer():
         up_slopes = slopes[:, 2:] / filter_diff[1:]
         return np.maximum(np.zeros(1), np.minimum(down_slopes, up_slopes))
 
-    def tokenize_with_weights(self, text, return_word_ids=False, image=None, audio=None, video=None, llama_template=None, skip_template=True, thinking=False, **kwargs):
+    def tokenize_with_weights(self, text, return_word_ids=False, image=None, audio=None, video=None, llama_template=None, skip_template=True, thinking=False, system_prompt="", **kwargs):
 
         # Process audio
         audio_features = []
@@ -1521,7 +1523,8 @@ class Gemma4_Tokenizer():
                 llama_text = llama_template.format(text)
             else:
                 # Build template from modalities present
-                system = "<|turn>system\n<|think|>\n<turn|>\n" if thinking else ""
+                think = "<|think|>\n" if thinking else ""
+                system = f"<|turn>system\n{think}{system_prompt}<turn|>\n" if thinking or system_prompt else ""
                 media = ""
                 if len(images) > 0:
                     if is_video:

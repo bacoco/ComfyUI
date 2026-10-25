@@ -3,29 +3,9 @@ from collections import defaultdict
 import torch
 
 from comfy.model_detection import detect_unet_config, model_config_from_unet, model_config_from_unet_config
+from comfy.ldm.lumina.model import NextDiT
+import comfy.ops
 import comfy.supported_models
-
-
-def test_minimax_h3_latent_channels_do_not_include_pdd_heads():
-    for heads in (1, 32):
-        shapes = {
-            "video_patch_proj.weight": (32, 96),
-            "audio_patch_proj.weight": (32, 32),
-            "final_layer.video_out.weight": (96 * heads, 32),
-            "final_layer.audio_out.weight": (32 * heads, 32),
-            "blocks.0.attn.q_norm.weight": (8,),
-            "blocks.0.attn.qkv_proj.weight": (96, 32),
-            "blocks.0.mlp.fc1.weight": (128, 32),
-            "condition_proj.weight": (32, 64),
-            "time_embedder.proj_in.weight": (32, 8),
-            "time_embedder.proj_out.weight": (16, 32),
-            "rope.inv_freq": (16,),
-        }
-        state = {key: torch.empty(shape, device="meta") for key, shape in shapes.items()}
-        config = detect_unet_config(state, "")
-        assert config["latents_dim"] == 24
-        assert config["audio_latents_dim"] == 32
-        assert config["pdd_steps"] == heads
 
 
 def _freeze(value):
@@ -323,6 +303,37 @@ class TestModelDetection:
         assert unet_config["proj_in_channels_shape"] == 2048
         assert unet_config["proj_in_channels_structure"] == 1024
 
+    def test_ming_image_save_preserves_identity_without_metadata(self):
+        for learned_padding in (False, True):
+            sd = {
+                "cap_embedder.1.weight": torch.empty(3840, 2560, device="meta"),
+                "noise_refiner.0.attention.k_norm.weight": torch.empty(128, device="meta"),
+            }
+            if learned_padding:
+                sd["cap_pad_token"] = torch.empty(1, 3840, device="meta")
+                sd["x_pad_token"] = torch.empty(1, 3840, device="meta")
+                assert type(model_config_from_unet(sd, "")) is comfy.supported_models.ZImage
+
+            model_config = model_config_from_unet(sd, "", metadata={"config": '{"transformer": {"image_model": "ming_image"}}'})
+            model = NextDiT(**model_config.unet_config, device="meta", operations=comfy.ops.manual_cast)
+            original_sd = model.state_dict()
+            del original_sd["__ming_image__"]
+            missing, unexpected = model.load_state_dict(original_sd, strict=False, assign=True)
+            assert missing == ["__ming_image__"]
+            assert unexpected == []
+            assert model.state_dict()["__ming_image__"].device.type == "cpu"
+            saved_sd = model_config.process_unet_state_dict_for_saving(model.state_dict())
+            reloaded = model_config_from_unet(saved_sd, "model.diffusion_model.")
+
+            assert type(reloaded) is comfy.supported_models.MingImage
+            assert reloaded.latent_format.scale_factor == model_config.latent_format.scale_factor
+            assert reloaded.sampling_settings == model_config.sampling_settings
+            assert reloaded.unet_config == model_config.unet_config
+
+            unprefixed = {k.removeprefix("model.diffusion_model."): v for k, v in saved_sd.items()}
+            assert type(model_config_from_unet(unprefixed, "")) is comfy.supported_models.MingImage
+            model.load_state_dict(reloaded.process_unet_state_dict(unprefixed), strict=True, assign=True)
+
     def test_unet_config_and_required_keys_combination_is_unique(self):
         """Each model in the registry must have a unique combination of
         ``unet_config`` and ``required_keys``. If two models share the same
@@ -340,3 +351,25 @@ class TestModelDetection:
             "combination, which makes detection ambiguous: "
             + "; ".join(", ".join(names) for names in duplicates.values())
         )
+
+
+def test_minimax_h3_latent_channels_do_not_include_pdd_heads():
+    for heads in (1, 32):
+        shapes = {
+            "video_patch_proj.weight": (32, 96),
+            "audio_patch_proj.weight": (32, 32),
+            "final_layer.video_out.weight": (96 * heads, 32),
+            "final_layer.audio_out.weight": (32 * heads, 32),
+            "blocks.0.attn.q_norm.weight": (8,),
+            "blocks.0.attn.qkv_proj.weight": (96, 32),
+            "blocks.0.mlp.fc1.weight": (128, 32),
+            "condition_proj.weight": (32, 64),
+            "time_embedder.proj_in.weight": (32, 8),
+            "time_embedder.proj_out.weight": (16, 32),
+            "rope.inv_freq": (16,),
+        }
+        state = {key: torch.empty(shape, device="meta") for key, shape in shapes.items()}
+        config = detect_unet_config(state, "", metadata={"config": '{"transformer":{"pdd_steps":%d}}' % heads})
+        assert config["latents_dim"] == 24
+        assert config["audio_latents_dim"] == 32
+        assert config["pdd_steps"] == heads
