@@ -4,7 +4,8 @@ import pytest
 import torch
 from torch import nn
 
-from comfy.ldm.minimax.model import MiniMaxH3Model, PackedLayout, time_shift_sigma
+from comfy.ldm.minimax.model import FinalLayer, MiniMaxH3Model, PackedLayout, time_shift_sigma
+import comfy.ops
 from comfy.model_sampling import CONST
 
 
@@ -113,3 +114,23 @@ def test_embed_and_pack_releases_intermediates(conditioning):
     assert torch.equal(slices["video"], outputs["video"])
     assert torch.equal(slices["audio"], outputs["audio"])
     assert torch.equal(slices["text"], context[0])
+
+
+def test_pdd_heads_load_and_reduce_to_one_velocity_per_stream():
+    layer = FinalLayer(4, 3, 4, 2, 1e-5, pdd_steps=32,
+                       operations=comfy.ops.disable_weight_init)
+    state = {
+        "video_out.weight": torch.zeros(128, 4),
+        "video_out.bias": torch.cat((torch.full((4,), 2.0), torch.zeros(124))),
+        "audio_out.weight": torch.zeros(64, 4),
+        "audio_out.bias": torch.cat((torch.full((2,), 3.0), torch.zeros(62))),
+    }
+    layer.load_state_dict(state, strict=False)
+    with torch.no_grad():
+        for name, parameter in layer.named_parameters():
+            if not name.startswith(("video_out.", "audio_out.")):
+                parameter.zero_()
+    video, audio = layer(torch.ones(2, 4), torch.zeros(1, 3), (0, 1, 0),
+                         (1, 2, 0), torch.tensor(1.0), torch.tensor([1.0, 0.0]), (12.0, 3.0))
+    torch.testing.assert_close(video, torch.full((1, 4), 2.0))
+    torch.testing.assert_close(audio, torch.full((1, 2), 3.0))

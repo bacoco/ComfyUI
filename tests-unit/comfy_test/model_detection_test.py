@@ -351,3 +351,25 @@ class TestModelDetection:
             "combination, which makes detection ambiguous: "
             + "; ".join(", ".join(names) for names in duplicates.values())
         )
+
+
+def test_minimax_h3_latent_channels_do_not_include_pdd_heads():
+    for heads in (1, 32):
+        shapes = {
+            "video_patch_proj.weight": (32, 96),
+            "audio_patch_proj.weight": (32, 32),
+            "final_layer.video_out.weight": (96 * heads, 32),
+            "final_layer.audio_out.weight": (32 * heads, 32),
+            "blocks.0.attn.q_norm.weight": (8,),
+            "blocks.0.attn.qkv_proj.weight": (96, 32),
+            "blocks.0.mlp.fc1.weight": (128, 32),
+            "condition_proj.weight": (32, 64),
+            "time_embedder.proj_in.weight": (32, 8),
+            "time_embedder.proj_out.weight": (16, 32),
+            "rope.inv_freq": (16,),
+        }
+        state = {key: torch.empty(shape, device="meta") for key, shape in shapes.items()}
+        config = detect_unet_config(state, "", metadata={"config": '{"transformer":{"pdd_steps":%d}}' % heads})
+        assert config["latents_dim"] == 24
+        assert config["audio_latents_dim"] == 32
+        assert config["pdd_steps"] == heads

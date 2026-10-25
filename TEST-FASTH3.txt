@@ -1,0 +1,66 @@
+Test FastH3 Omni dans ComfyUI sur le Spark
+
+Lancement : bash /home/baconnier/worktrees/comfyui-fasth3-omni/start-test.sh
+Interface : http://127.0.0.1:8192
+Workflow : user/default/workflows/FastH3_Omni_Spark_Test.json
+Requête API correspondante : user/default/fasth3-test-api.json
+
+Lancer uniquement lorsque le créneau de calcul lourd du Spark est libre.
+Le lanceur conserve la protection locale et refuse sinon de démarrer.
+Il ne coupe aucun autre service.
+
+Dans ComfyUI, ouvrir le workflow puis cliquer sur Run.
+Il utilise l'image officielle fasth3_reference.png : un homme parle en français
+dans une cuisine. Paramètres actuels : 608 × 352, 73 images, 24 images/s, 8 étapes,
+guidage 1, décalage vidéo 12 et audio 3, graine 0.
+La sortie attendue est un MP4 avec son dans output/fasth3-omni/.
+L'encodeur et les décodeurs existants sont réutilisés en lecture.
+
+Vérifié le 25 octobre 2026 :
+- Poids NVFP4 téléchargés : 13 773 998 700 octets.
+- SHA-256 conforme au dépôt officiel :
+  bf25ee58df65b4dfee349d612f7ac62a2fea0dddd1e68eb37e75c8ce8b166f5a
+- Validation native du workflow réussie ; preuve test-evidence/validation.json.
+- Interface inspectée ; captures test-evidence/before.png et after.png.
+- Après accord de Loic, ComfyUI habituel arrêté temporairement puis restauré.
+- Génération réussie : 88,1 secondes pour la première requête, chargement compris.
+- MP4 H.264 : 832 × 480, 124 images à 24 images/s ; audio AAC stéréo 32 kHz.
+- Fichier décodé entièrement, audio non silencieux et trois images inspectées.
+- Sortie : output/fasth3-omni/spark_480p_5s_seed0_00001_.mp4
+- Preuves de cet essai initial : test-evidence/480p-gpu-test-result.json
+  et 480p-media-verification.json.
+
+Correction nécessaire dans cette copie de travail seulement :
+La détection MiniMax H3 utilisait les sorties étendues PDD comme nombre de canaux
+latents. Elle lit maintenant les canaux aux projections d'entrée et déduit le
+nombre de sorties PDD séparément. Les couches de sortie réservent leurs poids
+et biais pour les 32 sorties internes, avant leur réduction pendant l'échantillonnage.
+Les tests ciblés couvrent la détection classique et PDD, le chargement et la
+réduction des sorties PDD et les deux tests existants de vitesse audio/vidéo.
+Ils passent. Les deux échecs initiaux sont conservés dans test-evidence/.
+Le code du ComfyUI habituel n'a pas été modifié.
+
+Comparaison avec les 60 secondes signalées par Loic :
+Les workflows vidéo enregistrés dans le ComfyUI habituel utilisent le modèle
+10Eros, 608 × 352 et 73 images (environ 3 secondes), avec 8 étapes.
+Cet essai FastH3 Omni utilise 832 × 480 et 124 images (environ 5 secondes),
+avec une référence d'identité et 8 étapes. Les huit étapes prennent environ
+64 secondes ; l'exécution complète prend 86,8 secondes côté serveur et
+88,1 secondes mesurées par le client, chargement compris.
+Les réglages exacts de l'exécution antérieure à 60 secondes ne sont pas établis.
+Aucun gain de vitesse à réglages égaux n'est démontré par cet essai.
+
+Sources :
+https://huggingface.co/FastVideo/FastH3-Omni-NVFP4-QAD-Comfy
+https://huggingface.co/FastVideo/FastH3-Omni-Comfy
+
+Nouvel essai demandé par Loic, à la même résolution et au même nombre d’images :
+608 × 352, 73 images à 24 images/s, 8 étapes et graine 0.
+28,66 secondes côté serveur ; 30,04 secondes mesurées côté client, chargement compris.
+Échantillonnage : environ 17 secondes. MP4 décodé, son stéréo non silencieux.
+ComfyUI habituel remis en route et file vide.
+Vidéo : output/fasth3-omni/spark_608x352_73frames_seed0_00001_.mp4
+Capture : test-evidence/workflow-608x352.png
+Les résultats du précédent essai 480p sont conservés avec le préfixe 480p-.
+Le texte et le conditionnement restent ceux de notre essai FastH3 Omni ;
+le temps de référence de 60 secondes est celui rapporté par Loic.
